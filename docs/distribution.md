@@ -69,10 +69,10 @@ cd homebrew-tap
 mkdir -p Casks
 ```
 
-After building the mac app, upload `out/make/zip/darwin/arm64/codiff-darwin-arm64-*.zip` to a stable release URL, for example a GitHub Release in the Codiff repository. Compute its checksum:
+After building the mac app, upload `out/make/zip/darwin/arm64/Codiff-darwin-arm64-*.zip` to a stable release URL, for example a GitHub Release in the Codiff repository. Compute its checksum:
 
 ```sh
-shasum -a 256 codiff-darwin-arm64-0.0.1.zip
+shasum -a 256 Codiff-darwin-arm64-0.0.1.zip
 ```
 
 Create `Casks/codiff.rb`:
@@ -82,14 +82,14 @@ cask "codiff" do
   version "0.0.1"
   sha256 "REPLACE_WITH_SHA256"
 
-  url "https://github.com/cpojer/codiff/releases/download/v#{version}/codiff-darwin-arm64-#{version}.zip"
+  url "https://github.com/cpojer/codiff/releases/download/v#{version}/Codiff-darwin-arm64-#{version}.zip"
   name "Codiff"
   desc "Local code review diff viewer"
   homepage "https://github.com/cpojer/codiff"
   depends_on arch: :arm64
 
   app "Codiff.app"
-  binary "#{appdir}/Codiff.app/Contents/MacOS/Codiff", target: "codiff"
+  binary "#{appdir}/Codiff.app/Contents/Resources/app/bin/codiff-app", target: "codiff"
 end
 ```
 
@@ -109,8 +109,13 @@ brew tap cpojer/tap
 brew install --cask codiff
 ```
 
-The cask symlinks the packaged Electron executable as `codiff`. Running `codiff`
-from a repository opens that folder, and running `codiff /path/to/repo` opens
-the provided folder.
+The cask symlinks Codiff's packaged terminal helper as `codiff`. Running
+`codiff` from a repository opens that folder, and running
+`codiff /path/to/repo` opens the provided folder without keeping the terminal
+attached to the Electron process.
+
+Users who install the `.app` directly can run `Codiff > Install Terminal Helper`
+from the app menu. Codiff installs the helper into the first writable location
+from `/opt/homebrew/bin`, `/usr/local/bin`, and `~/.local/bin`.
 
 For updates, upload a new zip, update `version` and `sha256`, commit, and push.

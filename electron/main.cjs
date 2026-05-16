@@ -1,7 +1,26 @@
-const { existsSync, readFileSync, writeFileSync } = require('node:fs');
+const {
+  accessSync,
+  constants,
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  readFileSync,
+  symlinkSync,
+  unlinkSync,
+  writeFileSync,
+} = require('node:fs');
 const { dirname, join, relative, resolve } = require('node:path');
 const { pathToFileURL } = require('node:url');
-const { app, BrowserWindow, ipcMain, Menu, nativeTheme, screen, shell } = require('electron');
+const {
+  app,
+  BrowserWindow,
+  dialog,
+  ipcMain,
+  Menu,
+  nativeTheme,
+  screen,
+  shell,
+} = require('electron');
 const squirrelStartup = require('electron-squirrel-startup');
 const { listRepositoryHistory, readRepositoryState } = require('./git-state.cjs');
 
@@ -11,8 +30,8 @@ let preferences = {
   showWhitespace: false,
 };
 
-const getCommandLineRepositoryPath = () => {
-  const args = process.argv.slice(process.defaultApp ? 2 : 1);
+const getCommandLineRepositoryPath = (commandLine = process.argv) => {
+  const args = commandLine.slice(process.defaultApp ? 2 : 1);
   return args.find((arg) => arg && !arg.startsWith('-'));
 };
 
@@ -44,19 +63,102 @@ const sendPreferencesChanged = () => {
   }
 };
 
+const openRepositoryFolder = async (browserWindow) => {
+  const result = await dialog.showOpenDialog(browserWindow ?? undefined, {
+    properties: ['openDirectory'],
+  });
+
+  if (!result.canceled && result.filePaths[0]) {
+    createWindow(result.filePaths[0]);
+  }
+};
+
+const getTerminalHelperSourcePath = () =>
+  app.isPackaged ? join(process.resourcesPath, 'app/bin/codiff-app') : join(root, 'bin/codiff.js');
+
+const getWritableHelperDirectory = () => {
+  for (const directory of ['/opt/homebrew/bin', '/usr/local/bin']) {
+    try {
+      if (existsSync(directory)) {
+        accessSync(directory, constants.W_OK);
+        return directory;
+      }
+    } catch {
+      // Keep looking for a writable install location.
+    }
+  }
+
+  const localBin = join(app.getPath('home'), '.local/bin');
+  mkdirSync(localBin, { recursive: true });
+  return localBin;
+};
+
+const installTerminalHelper = async (browserWindow) => {
+  try {
+    const sourcePath = getTerminalHelperSourcePath();
+    const targetPath = join(getWritableHelperDirectory(), 'codiff');
+
+    if (!existsSync(sourcePath)) {
+      throw new Error(`Could not find terminal helper at ${sourcePath}.`);
+    }
+
+    if (existsSync(targetPath)) {
+      const target = lstatSync(targetPath);
+
+      if (!target.isSymbolicLink()) {
+        throw new Error(`${targetPath} already exists and is not a symlink.`);
+      }
+
+      unlinkSync(targetPath);
+    }
+
+    symlinkSync(sourcePath, targetPath);
+
+    await dialog.showMessageBox(browserWindow ?? undefined, {
+      buttons: ['OK'],
+      message: `Installed codiff at ${targetPath}.`,
+      type: 'info',
+    });
+  } catch (error) {
+    await dialog.showMessageBox(browserWindow ?? undefined, {
+      buttons: ['OK'],
+      detail: error instanceof Error ? error.message : String(error),
+      message: 'Could not install the terminal helper.',
+      type: 'error',
+    });
+  }
+};
+
 const buildApplicationMenu = () =>
   Menu.buildFromTemplate([
     ...(process.platform === 'darwin'
       ? [
           {
             label: app.name,
-            submenu: [{ role: 'about' }, { type: 'separator' }, { role: 'quit' }],
+            submenu: [
+              { role: 'about' },
+              { type: 'separator' },
+              {
+                click: (_menuItem, browserWindow) => installTerminalHelper(browserWindow),
+                label: 'Install Terminal Helper',
+              },
+              { type: 'separator' },
+              { role: 'quit' },
+            ],
           },
         ]
       : []),
     {
       label: 'File',
-      submenu: [process.platform === 'darwin' ? { role: 'close' } : { role: 'quit' }],
+      submenu: [
+        {
+          accelerator: 'CommandOrControl+O',
+          click: (_menuItem, browserWindow) => openRepositoryFolder(browserWindow),
+          label: 'Open Folder...',
+        },
+        { type: 'separator' },
+        process.platform === 'darwin' ? { role: 'close' } : { role: 'quit' },
+      ],
     },
     {
       label: 'View',
@@ -128,7 +230,13 @@ if (squirrelStartup || !lock) {
   app.setName('Codiff');
 
   app.on('second-instance', (event, commandLine, workingDirectory, additionalData) => {
-    createWindow(resolve(additionalData?.repositoryPath || workingDirectory));
+    createWindow(
+      resolve(
+        additionalData?.repositoryPath ||
+          getCommandLineRepositoryPath(commandLine) ||
+          workingDirectory,
+      ),
+    );
   });
 
   app.on('ready', () => {

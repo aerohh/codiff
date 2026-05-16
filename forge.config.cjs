@@ -57,6 +57,7 @@ module.exports = {
       /^\/tsconfig/,
       /^\/vite\.config\./,
     ],
+    name: 'Codiff',
     osxNotarize: {
       appleId: process.env.APPLE_ID,
       appleIdPassword: process.env.APPLE_PASSWORD,
