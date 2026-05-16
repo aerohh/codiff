@@ -69,7 +69,6 @@ const workerHighlighterOptions = {
 
 const maxWorkerThreads = 3;
 const scrollSelectionActivationOffset = 10;
-const sidebarScrollHeaderOffset = 0;
 
 const codeViewUnsafeCSS = `
   :host {
@@ -288,6 +287,15 @@ const writeViewed = (root: string, viewed: Record<string, string>) => {
 
 const getItemId = (section: DiffSection) => `diff:${section.id}`;
 
+const getItemVersion = (value: string) => {
+  let hash = 0;
+  for (let index = 0; index < value.length; index += 1) {
+    hash = (hash << 5) - hash + value.charCodeAt(index);
+    hash |= 0;
+  }
+  return hash >>> 0;
+};
+
 type CodeViewItemMetadata = {
   file: ChangedFile;
   isCollapsed: boolean;
@@ -363,6 +371,8 @@ function Sidebar({
   onSelectPath: (path: string) => void;
   selectedPath: string | null;
 }) {
+  const allowSelectionScroll = useRef(false);
+  const allowSelectionScrollTimer = useRef<number | null>(null);
   const treeHostRef = useRef<HTMLDivElement>(null);
   const suppressSelectionChange = useRef(false);
   const paths = useMemo(() => files.map((file) => file.path), [files]);
@@ -383,6 +393,15 @@ function Sidebar({
     onSelectionChange: (paths) => {
       if (suppressSelectionChange.current) {
         return;
+      }
+
+      if (!allowSelectionScroll.current) {
+        return;
+      }
+      allowSelectionScroll.current = false;
+      if (allowSelectionScrollTimer.current != null) {
+        window.clearTimeout(allowSelectionScrollTimer.current);
+        allowSelectionScrollTimer.current = null;
       }
 
       const path = paths.at(-1);
@@ -423,6 +442,27 @@ function Sidebar({
     [model],
   );
 
+  const allowNextSelectionScroll = useCallback(() => {
+    allowSelectionScroll.current = true;
+    if (allowSelectionScrollTimer.current != null) {
+      window.clearTimeout(allowSelectionScrollTimer.current);
+    }
+
+    allowSelectionScrollTimer.current = window.setTimeout(() => {
+      allowSelectionScroll.current = false;
+      allowSelectionScrollTimer.current = null;
+    }, 500);
+  }, []);
+
+  useEffect(
+    () => () => {
+      if (allowSelectionScrollTimer.current != null) {
+        window.clearTimeout(allowSelectionScrollTimer.current);
+      }
+    },
+    [],
+  );
+
   useEffect(() => {
     if (!selectedPath) {
       return;
@@ -445,7 +485,11 @@ function Sidebar({
   }, [model, scrollPathIntoView, selectedPath]);
 
   return (
-    <div className="file-tree-shell" ref={treeHostRef}>
+    <div
+      className="file-tree-shell"
+      onPointerDownCapture={allowNextSelectionScroll}
+      ref={treeHostRef}
+    >
       <FileTree className="file-tree" model={model} />
     </div>
   );
@@ -516,6 +560,7 @@ function ReviewCodeView({
   viewed: Record<string, string>;
 }) {
   const codeViewRef = useRef<CodeViewHandle<undefined>>(null);
+  const handledScrollRequest = useRef<number | null>(null);
 
   const { firstItemByPath, itemMetadata, items } = useMemo(() => {
     const nextItems: Array<CodeViewItem> = [];
@@ -543,9 +588,11 @@ function ReviewCodeView({
           fileDiff: parseSectionDiff(file, section),
           id,
           type: 'diff',
-          version: `${file.fingerprint}:${section.id}:${isCollapsed ? 'collapsed' : 'open'}:${
-            isViewed ? 'viewed' : 'pending'
-          }:${index}:${selectedPath === file.path ? 'selected' : 'idle'}`,
+          version: getItemVersion(
+            `${file.fingerprint}:${section.id}:${isCollapsed ? 'collapsed' : 'open'}:${
+              isViewed ? 'viewed' : 'pending'
+            }:${index}:${selectedPath === file.path ? 'selected' : 'idle'}`,
+          ),
         });
       }
     }
@@ -560,6 +607,7 @@ function ReviewCodeView({
   const codeViewOptions = useMemo(
     () =>
       ({
+        __devOnlyValidateItemHeights: true,
         diffIndicators: 'bars',
         diffStyle: 'split',
         enableLineSelection: true,
@@ -593,67 +641,25 @@ function ReviewCodeView({
     [],
   );
 
-  const scrollItemHeaderIntoView = useCallback((itemId: string) => {
-    const handle = codeViewRef.current;
-    const viewer = handle?.getInstance();
-    if (!handle || !viewer) {
-      return;
-    }
-
-    handle.scrollTo({
-      behavior: 'instant',
-      id: itemId,
-      offset: 0,
-      type: 'item',
-    });
-
-    let attempts = 0;
-    const correctRenderedPosition = () => {
-      attempts += 1;
-
-      const nextViewer = codeViewRef.current?.getInstance();
-      const root = nextViewer?.getContainerElement();
-      const renderedItem = nextViewer?.getRenderedItems().find((item) => item.id === itemId);
-
-      if (!nextViewer || !root || !renderedItem) {
-        if (attempts < 4) {
-          requestAnimationFrame(correctRenderedPosition);
-        }
-        return;
-      }
-
-      const itemTop = renderedItem.element.getBoundingClientRect().top;
-      const rootTop = root.getBoundingClientRect().top;
-      const delta = itemTop - rootTop - sidebarScrollHeaderOffset;
-
-      if (Math.abs(delta) <= 1) {
-        return;
-      }
-
-      nextViewer.scrollTo({
-        behavior: 'instant',
-        position: nextViewer.getScrollTop() + delta + codeViewItemMetrics.diffHeaderHeight,
-        type: 'position',
-      });
-
-      if (attempts < 4) {
-        requestAnimationFrame(correctRenderedPosition);
-      }
-    };
-
-    requestAnimationFrame(correctRenderedPosition);
-  }, []);
-
   useEffect(() => {
     if (!scrollTarget) {
+      return;
+    }
+    if (handledScrollRequest.current === scrollTarget.request) {
       return;
     }
 
     const itemId = firstItemByPath.get(scrollTarget.path);
     if (itemId) {
-      scrollItemHeaderIntoView(itemId);
+      handledScrollRequest.current = scrollTarget.request;
+      codeViewRef.current?.scrollTo({
+        align: 'start',
+        behavior: 'smooth-auto',
+        id: itemId,
+        type: 'item',
+      });
     }
-  }, [firstItemByPath, scrollItemHeaderIntoView, scrollTarget]);
+  }, [firstItemByPath, scrollTarget]);
 
   const renderCustomHeader = useCallback(
     (item: CodeViewItem) => {
