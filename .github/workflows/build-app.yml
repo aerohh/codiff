@@ -71,20 +71,9 @@ jobs:
 
           pnpm exec electron-forge make --platform=linux --arch=x64
           test -d ./out
-          find ./out -maxdepth 5 -print | sort
 
           pnpm exec electron-forge make --platform=win32 --arch=x64
           test -d ./out
-
-      - name: List Native App Artifacts
-        if: always()
-        run: |
-          pwd
-          ls -la
-          find "${GITHUB_WORKSPACE}" -maxdepth 6 \( -name out -o -name make -o -name 'Codiff-*' -o -name 'codiff-*' \) -print | sort
-          if [ -d ./out ]; then
-            find ./out -maxdepth 5 -print | sort
-          fi
 
       - name: Upload Artifacts to GitHub
         uses: actions/upload-artifact@v4
