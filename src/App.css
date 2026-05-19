@@ -749,6 +749,112 @@
   overflow: clip;
 }
 
+.codiff-markdown-preview {
+  box-sizing: border-box;
+  color: var(--text);
+  font: 14px/1.55 var(--font-sans);
+  inline-size: min(100%, 860px);
+  max-inline-size: 860px;
+  min-inline-size: 0;
+  overflow-wrap: anywhere;
+  padding: 18px 24px 26px;
+  white-space: normal;
+  word-break: normal;
+}
+
+.codiff-markdown-preview > :first-child {
+  margin-top: 0;
+}
+
+.codiff-markdown-preview > :last-child {
+  margin-bottom: 0;
+}
+
+.codiff-markdown-preview h1,
+.codiff-markdown-preview h2,
+.codiff-markdown-preview h3,
+.codiff-markdown-preview h4,
+.codiff-markdown-preview h5,
+.codiff-markdown-preview h6 {
+  color: var(--text);
+  font-weight: 700;
+  line-height: 1.2;
+  margin: 22px 0 10px;
+}
+
+.codiff-markdown-preview h1 {
+  border-bottom: 1px solid var(--file-border);
+  font-size: 24px;
+  padding-bottom: 8px;
+}
+
+.codiff-markdown-preview h2 {
+  border-bottom: 1px solid var(--file-border);
+  font-size: 20px;
+  padding-bottom: 6px;
+}
+
+.codiff-markdown-preview h3 {
+  font-size: 17px;
+}
+
+.codiff-markdown-preview p,
+.codiff-markdown-preview blockquote,
+.codiff-markdown-preview ol,
+.codiff-markdown-preview ul,
+.codiff-markdown-preview pre {
+  margin: 0 0 14px;
+}
+
+.codiff-markdown-preview ol,
+.codiff-markdown-preview ul {
+  padding-left: 22px;
+}
+
+.codiff-markdown-preview li + li {
+  margin-top: 4px;
+}
+
+.codiff-markdown-preview blockquote {
+  border-left: 3px solid var(--file-border);
+  color: var(--muted);
+  padding-left: 12px;
+}
+
+.codiff-markdown-preview pre {
+  background: rgb(127 127 127 / 0.09);
+  border: 1px solid rgb(127 127 127 / 0.14);
+  border-radius: 8px;
+  corner-shape: squircle;
+  font: 13px/1.45 var(--font-mono);
+  overflow-x: hidden;
+  padding: 12px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.codiff-markdown-code-block {
+  background: rgb(127 127 127 / 0.09);
+  border-radius: 8px;
+  box-shadow: none;
+  corner-shape: squircle;
+  display: block;
+  margin: 0 0 14px;
+  max-inline-size: 100%;
+  min-inline-size: 0;
+  overflow: clip;
+}
+
+.codiff-markdown-preview code {
+  font-family: var(--font-mono);
+}
+
+.codiff-markdown-preview hr {
+  border: 0;
+  border-top: 1px solid var(--file-border);
+  margin: 20px 0;
+}
+
 .codiff-file-header {
   -webkit-backdrop-filter: blur(4px) saturate(1.18);
   align-items: center;
@@ -757,9 +863,11 @@
   box-shadow: inset 0 -1px 0 var(--file-border);
   color: var(--text);
   display: grid;
+  grid-auto-columns: max-content;
+  grid-auto-flow: column;
   gap: 10px;
   height: 54px;
-  grid-template-columns: minmax(0, 1fr) max-content max-content max-content max-content;
+  grid-template-columns: minmax(0, 1fr);
   min-width: 0;
   padding: 9px 10px;
   transition: border-radius 120ms ease;
@@ -796,6 +904,7 @@
 }
 
 .codiff-header-toggle,
+.codiff-markdown-button,
 .codiff-open-button,
 .codiff-viewed-button {
   -webkit-app-region: no-drag;
@@ -834,6 +943,7 @@
 }
 
 .codiff-header-toggle:hover .codiff-chevron-box,
+.codiff-markdown-button:hover,
 .codiff-open-button:hover:not(:disabled),
 .codiff-viewed-button:hover {
   background: rgb(127 127 127 / 0.11);
@@ -889,6 +999,7 @@
 .codiff-status-badge,
 .codiff-section-badge,
 .codiff-line-count,
+.codiff-markdown-button,
 .codiff-open-button,
 .codiff-viewed-button {
   border-radius: 14px;
@@ -936,6 +1047,7 @@
   color: rgb(143 93 24);
 }
 
+.codiff-markdown-button,
 .codiff-open-button,
 .codiff-viewed-button {
   border: 1px solid rgb(127 127 127 / 0.18);
@@ -944,6 +1056,11 @@
   min-height: 30px;
   padding: 0 12px;
   white-space: nowrap;
+}
+
+.codiff-markdown-button.active {
+  border-color: rgb(127 127 127 / 0.18);
+  color: var(--text);
 }
 
 .codiff-open-button {
@@ -1583,9 +1700,31 @@
     font-size: 12px;
   }
 
+  .sidebar-mode-toggle {
+    gap: 4px;
+    grid-template-columns: minmax(42px, 0.65fr) minmax(84px, 1.35fr) minmax(54px, 0.9fr);
+    padding-inline: 8px;
+  }
+
+  .sidebar-mode-toggle button {
+    font-size: 11px;
+    gap: 4px;
+    padding-inline: 4px;
+  }
+
+  .sidebar-tab-dot {
+    height: 6px;
+    width: 6px;
+  }
+
   .codiff-file-header {
     gap: 7px;
-    grid-template-columns: minmax(0, 1fr) max-content max-content max-content;
     padding-inline: 8px;
+  }
+
+  .codiff-markdown-button,
+  .codiff-open-button,
+  .codiff-viewed-button {
+    padding-inline: 9px;
   }
 }

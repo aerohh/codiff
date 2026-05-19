@@ -7,8 +7,15 @@ import {
   type CodeViewLineSelection,
   type CodeViewOptions,
   type FileDiffMetadata,
+  type FileOptions,
+  type LineAnnotation,
 } from '@pierre/diffs';
-import { CodeView, type CodeViewHandle, WorkerPoolContextProvider } from '@pierre/diffs/react';
+import {
+  CodeView,
+  File as CodeFile,
+  type CodeViewHandle,
+  WorkerPoolContextProvider,
+} from '@pierre/diffs/react';
 import type { FileTreeRowDecorationRenderer } from '@pierre/trees';
 import { FileTree, useFileTree } from '@pierre/trees/react';
 import {
@@ -42,9 +49,18 @@ import type {
   TerminalHelperStatus,
 } from './types.ts';
 
-type ReviewAnnotationMetadata = {
+type ReviewCommentAnnotationMetadata = {
   commentIds: ReadonlyArray<string>;
+  type: 'review-comment';
 };
+
+type MarkdownPreviewAnnotationMetadata = {
+  contents: string;
+  path: string;
+  type: 'markdown-preview';
+};
+
+type ReviewAnnotationMetadata = MarkdownPreviewAnnotationMetadata | ReviewCommentAnnotationMetadata;
 
 type CodeViewInstance = NonNullable<
   ReturnType<CodeViewHandle<ReviewAnnotationMetadata>['getInstance']>
@@ -253,17 +269,28 @@ const renderInlineMarkdown = (text: string): ReactNode => {
 
   const renderText = (value: string, keyPrefix: string): Array<ReactNode> => {
     const textNodes: Array<ReactNode> = [];
-    const boldPattern = /\*\*([^*\n]+)\*\*/g;
+    const emphasisPattern =
+      /\*\*([^*\n]+)\*\*|(?<![\w_])_([^_\n]+)_(?![\w_])|(?<![\w*])\*([^*\n]+)\*(?![\w*])/g;
     let textLastIndex = 0;
-    let boldMatch: RegExpExecArray | null;
+    let emphasisMatch: RegExpExecArray | null;
 
-    while ((boldMatch = boldPattern.exec(value))) {
-      if (boldMatch.index > textLastIndex) {
-        textNodes.push(value.slice(textLastIndex, boldMatch.index));
+    while ((emphasisMatch = emphasisPattern.exec(value))) {
+      if (emphasisMatch.index > textLastIndex) {
+        textNodes.push(value.slice(textLastIndex, emphasisMatch.index));
       }
 
-      textNodes.push(<strong key={`${keyPrefix}:bold:${boldMatch.index}`}>{boldMatch[1]}</strong>);
-      textLastIndex = boldPattern.lastIndex;
+      if (emphasisMatch[1] != null) {
+        textNodes.push(
+          <strong key={`${keyPrefix}:bold:${emphasisMatch.index}`}>{emphasisMatch[1]}</strong>,
+        );
+      } else {
+        textNodes.push(
+          <em key={`${keyPrefix}:italic:${emphasisMatch.index}`}>
+            {emphasisMatch[2] ?? emphasisMatch[3]}
+          </em>,
+        );
+      }
+      textLastIndex = emphasisPattern.lastIndex;
     }
 
     if (textLastIndex < value.length) {
@@ -293,7 +320,76 @@ const renderInlineMarkdown = (text: string): ReactNode => {
   return nodes.length > 0 ? nodes : text;
 };
 
-const renderMarkdown = (text: string): ReactNode => {
+const markdownFenceLanguageAliases: Record<string, string> = {
+  bash: 'bash',
+  cjs: 'cjs',
+  css: 'css',
+  diff: 'diff',
+  html: 'html',
+  javascript: 'js',
+  js: 'js',
+  json: 'json',
+  jsx: 'jsx',
+  markdown: 'md',
+  md: 'md',
+  mjs: 'mjs',
+  patch: 'patch',
+  py: 'py',
+  python: 'py',
+  rb: 'rb',
+  ruby: 'rb',
+  sh: 'sh',
+  shell: 'sh',
+  ts: 'ts',
+  tsx: 'tsx',
+  typescript: 'ts',
+  xml: 'xml',
+  yaml: 'yaml',
+  yml: 'yml',
+  zsh: 'zsh',
+};
+
+const getMarkdownFenceFileName = (info: string) => {
+  const language = info.trim().split(/\s+/)[0]?.toLowerCase();
+  if (!language) {
+    return 'snippet.txt';
+  }
+
+  const extension = markdownFenceLanguageAliases[language] ?? language.replaceAll(/[^\w+#.-]/g, '');
+  return extension ? `snippet.${extension}` : 'snippet.txt';
+};
+
+function MarkdownCodeBlock({
+  code,
+  highlighted,
+  info,
+}: {
+  code: string;
+  highlighted: boolean;
+  info: string;
+}) {
+  return highlighted ? (
+    <CodeFile
+      className="codiff-markdown-code-block"
+      disableWorkerPool={false}
+      file={{
+        cacheKey: `markdown-code:${info}:${code.length}:${code.slice(0, 64)}`,
+        contents: code,
+        name: getMarkdownFenceFileName(info),
+      }}
+      options={markdownCodeBlockOptions}
+    />
+  ) : (
+    <pre>
+      <code>{code}</code>
+    </pre>
+  );
+}
+
+const renderMarkdown = (
+  text: string,
+  { highlightCode = false }: { highlightCode?: boolean } = {},
+): ReactNode => {
   const blocks: Array<ReactNode> = [];
   const renderTextBlocks = (value: string, keyPrefix: string) => {
     for (const [index, block] of value
@@ -302,11 +398,41 @@ const renderMarkdown = (text: string): ReactNode => {
       .filter(Boolean)
       .entries()) {
       const lines = block.split('\n');
+      const heading = lines.length === 1 ? lines[0]?.match(/^(#{1,6})\s+(.+)$/) : null;
       const listItems = lines
         .map((line) => line.trim().match(/^[-*]\s+(.+)$/)?.[1])
         .filter((line): line is string => line != null);
+      const orderedListItems = lines
+        .map((line) => line.trim().match(/^\d+\.\s+(.+)$/)?.[1])
+        .filter((line): line is string => line != null);
+      const quoteLines = lines
+        .map((line) => line.trim().match(/^>\s?(.*)$/)?.[1])
+        .filter((line): line is string => line != null);
 
-      if (listItems.length === lines.length) {
+      if (heading) {
+        const headingContent = renderInlineMarkdown(heading[2]);
+        const key = `${keyPrefix}:h:${index}`;
+        switch (heading[1].length) {
+          case 1:
+            blocks.push(<h1 key={key}>{headingContent}</h1>);
+            break;
+          case 2:
+            blocks.push(<h2 key={key}>{headingContent}</h2>);
+            break;
+          case 3:
+            blocks.push(<h3 key={key}>{headingContent}</h3>);
+            break;
+          case 4:
+            blocks.push(<h4 key={key}>{headingContent}</h4>);
+            break;
+          case 5:
+            blocks.push(<h5 key={key}>{headingContent}</h5>);
+            break;
+          default:
+            blocks.push(<h6 key={key}>{headingContent}</h6>);
+            break;
+        }
+      } else if (listItems.length === lines.length) {
         blocks.push(
           <ul key={`${keyPrefix}:list:${index}`}>
             {listItems.map((line, lineIndex) => (
@@ -314,17 +440,32 @@ const renderMarkdown = (text: string): ReactNode => {
             ))}
           </ul>,
         );
-      } else {
+      } else if (orderedListItems.length === lines.length) {
         blocks.push(
-          <p key={`${keyPrefix}:p:${index}`}>
-            {lines.map((line, lineIndex) => (
-              <span key={`${keyPrefix}:p:${index}:${lineIndex}`}>
+          <ol key={`${keyPrefix}:ordered-list:${index}`}>
+            {orderedListItems.map((line, lineIndex) => (
+              <li key={`${keyPrefix}:ordered-list:${index}:${lineIndex}`}>
+                {renderInlineMarkdown(line)}
+              </li>
+            ))}
+          </ol>,
+        );
+      } else if (quoteLines.length === lines.length) {
+        blocks.push(
+          <blockquote key={`${keyPrefix}:quote:${index}`}>
+            {quoteLines.map((line, lineIndex) => (
+              <span key={`${keyPrefix}:quote:${index}:${lineIndex}`}>
                 {lineIndex > 0 ? <br /> : null}
                 {renderInlineMarkdown(line)}
               </span>
             ))}
-          </p>,
+          </blockquote>,
         );
+      } else if (lines.length === 1 && /^-{3,}$/.test(lines[0].trim())) {
+        blocks.push(<hr key={`${keyPrefix}:hr:${index}`} />);
+      } else {
+        const paragraphText = lines.map((line) => line.trim()).join(' ');
+        blocks.push(<p key={`${keyPrefix}:p:${index}`}>{renderInlineMarkdown(paragraphText)}</p>);
       }
     }
   };
@@ -339,9 +480,12 @@ const renderMarkdown = (text: string): ReactNode => {
     }
 
     blocks.push(
-      <pre key={`code:${match.index}`}>
-        <code>{match[2]}</code>
-      </pre>,
+      <MarkdownCodeBlock
+        code={match[2]}
+        highlighted={highlightCode}
+        info={match[1]}
+        key={`code:${match.index}`}
+      />,
     );
     lastIndex = fencePattern.lastIndex;
   }
@@ -408,6 +552,95 @@ const workerHighlighterOptions = {
   useTokenTransformer: false,
 };
 
+const markdownCodeBlockOptions = {
+  disableFileHeader: true,
+  disableLineNumbers: true,
+  enableGutterUtility: false,
+  lineHoverHighlight: 'disabled',
+  overflow: 'wrap',
+  theme: {
+    dark: 'Dunkel',
+    light: 'Licht',
+  },
+  themeType: 'system',
+  tokenizeMaxLength: 100_000,
+  tokenizeMaxLineLength: 20_000,
+  unsafeCSS: `
+    :host {
+      --diffs-font-family: var(--font-mono);
+      --diffs-font-size: 13px;
+      --diffs-line-height: 20px;
+      --diffs-light-bg: transparent;
+      --diffs-dark-bg: transparent;
+      --diffs-bg: transparent;
+      --diffs-bg-context: transparent;
+      --diffs-bg-context-gutter: transparent;
+      --diffs-bg-buffer: transparent;
+      --diffs-bg-separator: transparent;
+      --diffs-bg-hover-override: transparent;
+    }
+
+    [data-file] {
+      background: transparent;
+      border: 0;
+      box-shadow: none;
+    }
+
+    pre,
+    code,
+    [data-file] [data-code],
+    [data-file] [data-content],
+    [data-file] [data-gutter] {
+      background: transparent;
+      background-color: transparent;
+      min-width: 0;
+    }
+
+    [data-file] [data-line],
+    [data-file] [data-column-number],
+    [data-file] [data-gutter-buffer],
+    [data-file] [data-line-annotation] {
+      --diffs-computed-decoration-bg: transparent;
+      --diffs-computed-diff-line-bg: transparent;
+      --diffs-computed-selected-line-bg: transparent;
+      --diffs-computed-hovered-line-bg: transparent;
+      --diffs-line-bg: transparent;
+      background: transparent;
+      background-color: transparent;
+    }
+
+    [data-file] [data-line][data-hovered],
+    [data-file] [data-column-number][data-hovered] {
+      --diffs-line-bg: transparent;
+      background-color: transparent;
+    }
+
+    [data-file] [data-gutter-utility-slot],
+    [data-file] [data-utility-button] {
+      display: none;
+      pointer-events: none;
+    }
+
+    [data-file] [data-code] {
+      max-height: 420px;
+      max-width: 100%;
+      overflow-x: hidden;
+    }
+
+    [data-overflow="wrap"] [data-line] {
+      overflow-wrap: anywhere;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
+    [data-code]::-webkit-scrollbar-track {
+      margin-left: 0;
+      margin-right: 0;
+    }
+  `,
+  useTokenTransformer: false,
+} satisfies FileOptions<never>;
+
 const maxWorkerThreads = 3;
 
 const fileTreeSort = (
@@ -452,6 +685,17 @@ const codeViewUnsafeCSS = `
   [data-diff-type="single"] [data-code]::-webkit-scrollbar-track,
   [data-diff-type="split"] [data-code][data-additions]::-webkit-scrollbar-track {
     margin-right: 14px;
+  }
+
+  :host(.codiff-markdown-preview-item) [data-file] [data-code] {
+    grid-column: 1 / -1;
+  }
+
+  :host(.codiff-markdown-preview-item) [data-file] [data-line="1"][data-line-index="0"][data-line-type="context"],
+  :host(.codiff-markdown-preview-item) [data-file] [data-column-number="1"][data-line-index="0"][data-line-type="context"],
+  :host(.codiff-markdown-preview-item) [data-gutter] > [data-gutter-utility-slot] {
+    display: none;
+    pointer-events: none;
   }
 
   .codiff-search-mark {
@@ -649,6 +893,29 @@ const writeViewed = (root: string, viewed: Record<string, string>) => {
 };
 
 const getItemId = (section: DiffSection) => `diff:${section.id}`;
+
+const isMarkdownFilePath = (path: string) => /\.md$/i.test(path);
+
+const joinDiffLines = (lines: ReadonlyArray<string>) =>
+  lines.some((line) => line.includes('\n')) ? lines.join('') : lines.join('\n');
+
+const getMarkdownPreviewContents = (
+  file: ChangedFile,
+  section: DiffSection,
+  fileDiff: FileDiffMetadata,
+) => {
+  if (!isMarkdownFilePath(file.path) || section.binary || section.loadState !== 'ready') {
+    return null;
+  }
+
+  if (section.newFile) {
+    return section.newFile.contents;
+  }
+
+  return file.status === 'added' || file.status === 'untracked'
+    ? joinDiffLines(fileDiff.additionLines)
+    : null;
+};
 
 const emptyDiffLineCount: DiffLineCount = {
   additions: 0,
@@ -978,8 +1245,10 @@ const getItemVersion = (value: string) => {
 };
 
 type CodeViewItemMetadata = {
+  canRenderMarkdown: boolean;
   file: ChangedFile;
   isCollapsed: boolean;
+  isMarkdownPreview: boolean;
   isSelected: boolean;
   isViewed: boolean;
   lineCount: DiffLineCount;
@@ -1894,16 +2163,20 @@ function CodeViewHeader({
   meta,
   onOpenFile,
   onToggleCollapsed,
+  onToggleMarkdownPreview,
   onToggleViewed,
 }: {
   meta: CodeViewItemMetadata;
   onOpenFile: (file: ChangedFile) => void;
   onToggleCollapsed: (file: ChangedFile, isCollapsed: boolean) => void;
+  onToggleMarkdownPreview: (section: DiffSection) => void;
   onToggleViewed: (file: ChangedFile, isViewed: boolean) => void;
 }) {
   const {
+    canRenderMarkdown,
     file,
     isCollapsed,
+    isMarkdownPreview,
     isSelected,
     isViewed,
     lineCount,
@@ -1945,6 +2218,17 @@ function CodeViewHeader({
       </button>
       <DiffLineCountBadge lineCount={lineCount} />
       <div className={`codiff-status-badge ${file.status}`}>{statusLabel[file.status]}</div>
+      {canRenderMarkdown ? (
+        <button
+          aria-pressed={isMarkdownPreview}
+          className={`codiff-markdown-button${isMarkdownPreview ? ' active' : ''}`}
+          onClick={() => onToggleMarkdownPreview(section)}
+          title={isMarkdownPreview ? 'View as Diff' : 'View as Markdown'}
+          type="button"
+        >
+          {isMarkdownPreview ? 'View as Diff' : 'View as Markdown'}
+        </button>
+      ) : null}
       <button
         className="codiff-open-button"
         disabled={!canOpenFile}
@@ -2000,6 +2284,14 @@ const canSubmitCommentToGitHub = (comment: ReviewComment) =>
   comment.body.trim().length > 0 &&
   comment.githubSubmit?.status !== 'submitting';
 
+function MarkdownPreview({ contents }: { contents: string }) {
+  return (
+    <div className="codiff-markdown-preview">
+      {renderMarkdown(contents, { highlightCode: true })}
+    </div>
+  );
+}
+
 function ReviewAnnotation({
   annotation,
   comments,
@@ -2014,7 +2306,7 @@ function ReviewAnnotation({
   onSubmitComment,
   onUpdateComment,
 }: {
-  annotation: DiffLineAnnotation<ReviewAnnotationMetadata>;
+  annotation: DiffLineAnnotation<ReviewCommentAnnotationMetadata>;
   comments: ReadonlyArray<ReviewComment>;
   focusCommentId: string | null;
   focusCommentRequest: number;
@@ -2241,6 +2533,9 @@ function ReviewCodeView({
   const codeViewRef = useRef<CodeViewHandle<ReviewAnnotationMetadata>>(null);
   const handledScrollRequestRef = useRef<number | null>(null);
   const highlightFrameRef = useRef<number | null>(null);
+  const [markdownPreviewSections, setMarkdownPreviewSections] = useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
   const [selectedLines, setSelectedLines] = useState<CodeViewLineSelection | null>(null);
   const stickyHeaderFrameRef = useRef<number | null>(null);
   const commentsBySection = useMemo(() => {
@@ -2267,15 +2562,19 @@ function ReviewCodeView({
 
       for (const [index, { fileDiff, section }] of sections.entries()) {
         const id = getItemId(section);
+        const markdownPreviewContents = getMarkdownPreviewContents(file, section, fileDiff);
+        const canRenderMarkdown = markdownPreviewContents != null;
+        const isMarkdownPreview = canRenderMarkdown && markdownPreviewSections.has(section.id);
         const annotationMap = new Map<string, DiffLineAnnotation<ReviewAnnotationMetadata>>();
         for (const comment of commentsBySection.get(section.id) ?? []) {
           const key = getCommentKey(comment);
           const existing = annotationMap.get(key);
-          if (existing) {
+          if (existing && existing.metadata.type === 'review-comment') {
             annotationMap.set(key, {
               ...existing,
               metadata: {
                 commentIds: [...existing.metadata.commentIds, comment.id],
+                type: 'review-comment',
               },
             });
           } else {
@@ -2283,6 +2582,7 @@ function ReviewCodeView({
               lineNumber: comment.lineNumber,
               metadata: {
                 commentIds: [comment.id],
+                type: 'review-comment',
               },
               side: comment.side,
             });
@@ -2290,8 +2590,10 @@ function ReviewCodeView({
         }
 
         nextItemMetadata.set(id, {
+          canRenderMarkdown,
           file,
           isCollapsed,
+          isMarkdownPreview,
           isSelected: selectedPath === file.path,
           isViewed,
           lineCount,
@@ -2300,6 +2602,39 @@ function ReviewCodeView({
           walkthroughNote: walkthroughNotes.get(file.path),
         });
         nextFirstItemByPath.set(file.path, nextFirstItemByPath.get(file.path) ?? id);
+        if (isMarkdownPreview) {
+          nextItems.push({
+            annotations: [
+              {
+                lineNumber: 1,
+                metadata: {
+                  contents: markdownPreviewContents,
+                  path: file.path,
+                  type: 'markdown-preview',
+                },
+              } satisfies LineAnnotation<ReviewAnnotationMetadata>,
+            ],
+            collapsed: isCollapsed,
+            file: {
+              cacheKey: `markdown-preview:${section.newFile?.cacheKey ?? file.fingerprint}:${
+                markdownPreviewContents.length
+              }`,
+              contents: ' ',
+              lang: 'text',
+              name: file.path,
+            },
+            id,
+            type: 'file',
+            version: getItemVersion(
+              `${itemVersionByPath[file.path] ?? 0}:${file.fingerprint}:${section.id}:markdown:${
+                isCollapsed ? 'collapsed' : 'open'
+              }:${isViewed ? 'viewed' : 'pending'}:${index}:${
+                selectedPath === file.path ? 'selected' : 'idle'
+              }:${walkthroughNotes.get(file.path)?.reason ?? ''}:${markdownPreviewContents.length}`,
+            ),
+          });
+          continue;
+        }
         nextItems.push({
           annotations: [...annotationMap.values()],
           collapsed: isCollapsed,
@@ -2330,6 +2665,7 @@ function ReviewCodeView({
     files,
     forceExpandedPaths,
     itemVersionByPath,
+    markdownPreviewSections,
     selectedPath,
     showWhitespace,
     viewed,
@@ -2353,6 +2689,10 @@ function ReviewCodeView({
         lineDiffType: 'char',
         lineHoverHighlight: 'both',
         onGutterUtilityClick: (range, context) => {
+          if (context.item.type !== 'diff') {
+            return;
+          }
+
           const meta = itemMetadata.get(context.item.id);
           if (!meta || meta.isCollapsed) {
             return;
@@ -2395,6 +2735,12 @@ function ReviewCodeView({
             side,
           });
         },
+        onPostRender: (node, _instance, context) => {
+          node.classList.toggle(
+            'codiff-markdown-preview-item',
+            itemMetadata.get(context.item.id)?.isMarkdownPreview === true,
+          );
+        },
         stickyHeaders: true,
         theme: {
           dark: 'Dunkel',
@@ -2422,6 +2768,22 @@ function ReviewCodeView({
       onDeleteComment(commentId);
     },
     [clearCommentLineHighlight, onDeleteComment],
+  );
+
+  const toggleMarkdownPreview = useCallback(
+    (section: DiffSection) => {
+      clearCommentLineHighlight();
+      setMarkdownPreviewSections((current) => {
+        const next = new Set(current);
+        if (next.has(section.id)) {
+          next.delete(section.id);
+        } else {
+          next.add(section.id);
+        }
+        return next;
+      });
+    },
+    [clearCommentLineHighlight],
   );
 
   const workerPoolOptions = useMemo(
@@ -2577,21 +2939,28 @@ function ReviewCodeView({
           meta={meta}
           onOpenFile={onOpenFile}
           onToggleCollapsed={onToggleCollapsed}
+          onToggleMarkdownPreview={toggleMarkdownPreview}
           onToggleViewed={onToggleViewed}
         />
       ) : null;
     },
-    [itemMetadata, onOpenFile, onToggleCollapsed, onToggleViewed],
+    [itemMetadata, onOpenFile, onToggleCollapsed, onToggleViewed, toggleMarkdownPreview],
   );
 
   const renderAnnotation = useCallback(
     (
-      annotation: DiffLineAnnotation<ReviewAnnotationMetadata>,
+      annotation:
+        | DiffLineAnnotation<ReviewAnnotationMetadata>
+        | LineAnnotation<ReviewAnnotationMetadata>,
       item: CodeViewItem<ReviewAnnotationMetadata>,
-    ) =>
-      item.type === 'diff' ? (
+    ) => {
+      if (annotation.metadata.type === 'markdown-preview') {
+        return <MarkdownPreview contents={annotation.metadata.contents} />;
+      }
+
+      return item.type === 'diff' ? (
         <ReviewAnnotation
-          annotation={annotation}
+          annotation={annotation as DiffLineAnnotation<ReviewCommentAnnotationMetadata>}
           comments={comments}
           focusCommentId={focusCommentId}
           focusCommentRequest={focusCommentRequest}
@@ -2604,7 +2973,8 @@ function ReviewCodeView({
           onSubmitComment={onSubmitComment}
           onUpdateComment={onUpdateComment}
         />
-      ) : null,
+      ) : null;
+    },
     [
       comments,
       clearCommentLineHighlight,
