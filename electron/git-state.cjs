@@ -1,7 +1,11 @@
 // @ts-check
 
 const { parseStatus, validateRepositoryPath } = require('./git-state/common.cjs');
-const { listRepositoryHistory, readCommitState } = require('./git-state/commit.cjs');
+const {
+  listRepositoryHistory,
+  readCommitSectionContent,
+  readCommitState,
+} = require('./git-state/commit.cjs');
 const {
   normalizeGitHubReviewComment,
   normalizePullRequestComment,
@@ -11,13 +15,14 @@ const {
   submitPullRequestReview,
 } = require('./git-state/pull-request.cjs');
 const {
-  readDiffSectionContent,
+  readDiffSectionContent: readWorkingTreeDiffSectionContent,
   readGitIdentity,
   readRepositoryChangeSignature,
   readWorkingTreeState,
 } = require('./git-state/working-tree.cjs');
 
 /**
+ * @typedef {import('../src/types.ts').DiffSectionContentRequest} DiffSectionContentRequest
  * @typedef {import('../src/types.ts').RepositoryState} RepositoryState
  * @typedef {import('../src/types.ts').ReviewSource} ReviewSource
  */
@@ -29,6 +34,14 @@ const readRepositoryState = async (launchPath, source = { type: 'working-tree' }
     : source.type === 'commit'
       ? readCommitState(launchPath, source.ref)
       : readWorkingTreeState(launchPath);
+
+/** @param {string} launchPath @param {DiffSectionContentRequest} request */
+const readDiffSectionContent = async (launchPath, request) =>
+  request.kind === 'commit' || request.source?.type === 'commit'
+    ? readCommitSectionContent(launchPath, request.source?.ref || 'HEAD', request.path, {
+        force: request.force,
+      })
+    : readWorkingTreeDiffSectionContent(launchPath, request);
 
 module.exports = {
   listRepositoryHistory,

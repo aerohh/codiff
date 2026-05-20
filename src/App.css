@@ -747,7 +747,7 @@
 
 .window-drag-region {
   -webkit-app-region: drag;
-  height: 38px;
+  height: 12px;
   left: 0;
   position: fixed;
   right: 0;

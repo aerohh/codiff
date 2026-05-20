@@ -1,6 +1,6 @@
 // @ts-check
 
-const { execFile } = require('node:child_process');
+const { execFile, spawn } = require('node:child_process');
 const { promises: fs } = require('node:fs');
 const { createHash } = require('node:crypto');
 const { isAbsolute, join, normalize, sep } = require('node:path');
@@ -69,6 +69,39 @@ const gitBuffer = async (repoPath, args) => {
   });
   return stdout;
 };
+
+/**
+ * @param {string} repoPath
+ * @param {ReadonlyArray<string>} args
+ * @param {string | Buffer} input
+ * @returns {Promise<Buffer>}
+ */
+const gitBufferWithInput = (repoPath, args, input) =>
+  new Promise((resolve, reject) => {
+    const child = spawn('git', ['-C', repoPath, ...args], {
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    /** @type {Array<Buffer>} */
+    const stdout = [];
+    /** @type {Array<Buffer>} */
+    const stderr = [];
+
+    child.stdout.on('data', (chunk) => stdout.push(chunk));
+    child.stderr.on('data', (chunk) => stderr.push(chunk));
+    child.on('error', reject);
+    child.on('close', (code) => {
+      if (code === 0) {
+        resolve(Buffer.concat(stdout));
+      } else {
+        const error = new Error(
+          Buffer.concat(stderr).toString('utf8') || `git exited with status ${code}`,
+        );
+        reject(error);
+      }
+    });
+
+    child.stdin.end(input);
+  });
 
 const EAGER_TEXT_FILE_LIMIT = 256 * 1024;
 const MANUAL_TEXT_FILE_LIMIT = 2 * 1024 * 1024;
@@ -662,6 +695,7 @@ module.exports = {
   getWorkingTreeContents,
   git,
   gitBuffer,
+  gitBufferWithInput,
   gitOrEmpty,
   isBinaryBuffer,
   normalizeStatus,

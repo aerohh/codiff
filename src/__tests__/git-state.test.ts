@@ -566,6 +566,43 @@ test('readRepositoryState reads merge commits against the first parent', async (
   });
 });
 
+test('benchmarks commit diff generation duration for many changed files', async () => {
+  await withRepo(async (repo) => {
+    const fileCount = 80;
+    await Promise.all(
+      Array.from({ length: fileCount }, (_, index) =>
+        writeRepoFile(
+          repo,
+          `src/module-${index.toString().padStart(3, '0')}.ts`,
+          `${'export const beforeValue = 1;\n'.repeat(60)}export const file = ${index};\n`,
+        ),
+      ),
+    );
+    await commitAll(repo, 'initial commit');
+    await Promise.all(
+      Array.from({ length: fileCount }, (_, index) =>
+        writeRepoFile(
+          repo,
+          `src/module-${index.toString().padStart(3, '0')}.ts`,
+          `${'export const afterValue = 2;\n'.repeat(80)}export const file = ${index};\n`,
+        ),
+      ),
+    );
+    await commitAll(repo, 'large history commit');
+    const commit = (await git(repo, ['rev-parse', 'HEAD'])).trim();
+
+    const startedAt = performance.now();
+    const state = await readRepositoryState(repo, {
+      ref: commit,
+      type: 'commit',
+    });
+    const duration = performance.now() - startedAt;
+
+    expect(state.files).toHaveLength(fileCount);
+    expect(duration).toBeLessThan(5000);
+  });
+});
+
 test('readRepositoryState summarizes committed files over the manual text limit', async () => {
   await withRepo(async (repo) => {
     await writeRepoFile(repo, 'base.txt', 'base\n');
@@ -583,6 +620,42 @@ test('readRepositoryState summarizes committed files over the manual text limit'
     expect(section?.summary?.canLoad).toBe(false);
     expect(section?.newFile).toBeUndefined();
     expect(section?.patch).toBe('');
+  });
+});
+
+test('readRepositoryState defers medium committed files and loads them on demand', async () => {
+  await withRepo(async (repo) => {
+    await writeRepoFile(repo, 'base.txt', 'base\n');
+    await commitAll(repo, 'initial commit');
+    const contents = `${'large committed line\n'.repeat(14_000)}end\n`;
+    await writeRepoFile(repo, 'large.txt', contents);
+    await commitAll(repo, 'large commit');
+    const commit = (await git(repo, ['rev-parse', 'HEAD'])).trim();
+
+    const state = await readRepositoryState(repo, {
+      ref: commit,
+      type: 'commit',
+    });
+    const section = state.files.find((file) => file.path === 'large.txt')?.sections[0];
+
+    expect(section?.loadState).toBe('deferred');
+    expect(section?.summary?.canLoad).toBe(true);
+    expect(section?.newFile).toBeUndefined();
+    expect(section?.patch).toBe('');
+
+    const loadedSection = await readDiffSectionContent(repo, {
+      force: true,
+      kind: 'commit',
+      path: 'large.txt',
+      source: {
+        ref: commit,
+        type: 'commit',
+      },
+    });
+
+    expect(loadedSection.loadState).toBe('ready');
+    expect(loadedSection.newFile?.contents).toBe(contents);
+    expect(loadedSection.patch).toContain('+large committed line');
   });
 });
 

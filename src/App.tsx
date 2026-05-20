@@ -282,7 +282,11 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (!state || state.source.type !== 'working-tree' || !selectedPath) {
+    if (
+      !state ||
+      (state.source.type !== 'working-tree' && state.source.type !== 'commit') ||
+      !selectedPath
+    ) {
       return;
     }
 
