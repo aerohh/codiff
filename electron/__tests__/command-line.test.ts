@@ -32,6 +32,34 @@ test('parses commit and walkthrough command-line options', () => {
   });
 });
 
+test('parses positional HEAD revisions as commit sources', () => {
+  expect(parseCommandLineArguments(['codiff', 'HEAD'])).toEqual({
+    launchOptions: {
+      repositoryPathProvided: false,
+      source: {
+        ref: 'HEAD',
+        type: 'commit',
+      },
+      walkthrough: false,
+    },
+    pullRequestNumber: null,
+    repositoryPath: null,
+  });
+
+  expect(parseCommandLineArguments(['codiff', 'HEAD^1', '/repo'])).toEqual({
+    launchOptions: {
+      repositoryPathProvided: true,
+      source: {
+        ref: 'HEAD^1',
+        type: 'commit',
+      },
+      walkthrough: false,
+    },
+    pullRequestNumber: null,
+    repositoryPath: '/repo',
+  });
+});
+
 test('parses pull request markers without resolving the repository remote', () => {
   expect(parseCommandLineArguments(['codiff', 'pr', '12', '/repo'])).toMatchObject({
     launchOptions: {

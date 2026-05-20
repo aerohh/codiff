@@ -12,10 +12,16 @@ const { parseArgs } = require('node:util');
  */
 
 const commitHashPattern = /^[0-9a-f]{4,64}$/i;
+const headCommitRefPattern = /^(?:HEAD|@)(?:(?:[~^]\d*)|\^\{[^}]+\}|@\{[^}]+\})*$/;
 const pullRequestNumberPattern = /^#([1-9]\d*)$/;
+const revisionSyntaxPattern = /(?:\^|~|@\{[^}]+\})/;
 
 /** @param {string} arg */
-const isCommitHashArgument = (arg) => commitHashPattern.test(arg) && !existsSync(resolve(arg));
+const isCommitRefArgument = (arg) =>
+  !existsSync(resolve(arg)) &&
+  (commitHashPattern.test(arg) ||
+    headCommitRefPattern.test(arg) ||
+    revisionSyntaxPattern.test(arg));
 
 /** @param {string} arg */
 const parsePullRequestNumberArgument = (arg) => {
@@ -182,7 +188,7 @@ const parseCommandLineArguments = (commandLine = process.argv) => {
       }
     }
 
-    if (!commitRef && isCommitHashArgument(arg)) {
+    if (!commitRef && isCommitRefArgument(arg)) {
       commitRef = arg;
     } else if (repositoryPath == null) {
       repositoryPath = arg;

@@ -4,9 +4,15 @@ import { resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 
 const commitHashPattern = /^[0-9a-f]{4,64}$/i;
+const headCommitRefPattern = /^(?:HEAD|@)(?:(?:[~^]\d*)|\^\{[^}]+\}|@\{[^}]+\})*$/;
 const pullRequestNumberPattern = /^#([1-9]\d*)$/;
+const revisionSyntaxPattern = /(?:\^|~|@\{[^}]+\})/;
 
-const isCommitHashArgument = (arg) => commitHashPattern.test(arg) && !existsSync(resolve(arg));
+const isCommitRefArgument = (arg) =>
+  !existsSync(resolve(arg)) &&
+  (commitHashPattern.test(arg) ||
+    headCommitRefPattern.test(arg) ||
+    revisionSyntaxPattern.test(arg));
 
 const parsePullRequestNumberArgument = (arg) => {
   const match = arg.match(pullRequestNumberPattern);
@@ -158,7 +164,7 @@ export const parseArguments = (args) => {
       }
     }
 
-    if (!commitRef && isCommitHashArgument(arg)) {
+    if (!commitRef && isCommitRefArgument(arg)) {
       commitRef = arg;
     } else if (requestedPath == null) {
       requestedPath = arg;

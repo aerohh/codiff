@@ -22,6 +22,28 @@ expect_commit_ref=0
 expect_pull_request_number=0
 walkthrough=0
 
+is_commit_ref_arg() {
+  ref_arg="$1"
+
+  if [ -e "$ref_arg" ]; then
+    return 1
+  fi
+
+  if printf '%s' "$ref_arg" | grep -Eq '^[0-9a-fA-F]{4,64}$'; then
+    return 0
+  fi
+
+  if printf '%s' "$ref_arg" | grep -Eq '^(@|HEAD)(([~^][0-9]*)|(\^\{[^}]+\})|(@\{[^}]+\}))*$'; then
+    return 0
+  fi
+
+  if printf '%s' "$ref_arg" | grep -Eq '(\^|~|@\{[^}]+\})'; then
+    return 0
+  fi
+
+  return 1
+}
+
 for arg in "$@"; do
   if [ "$expect_commit_ref" -eq 1 ]; then
     commit_ref="$arg"
@@ -57,7 +79,7 @@ for arg in "$@"; do
         pull_request_source="$arg"
       elif [ -z "$pull_request_source" ] && printf '%s' "$arg" | grep -Eq '^https://github\.com/[^/]+/[^/]+/pull/[0-9]+/?$'; then
         pull_request_source="$arg"
-      elif [ -z "$commit_ref" ] && printf '%s' "$arg" | grep -Eq '^[0-9a-fA-F]{4,64}$' && [ ! -e "$arg" ]; then
+      elif [ -z "$commit_ref" ] && is_commit_ref_arg "$arg"; then
         commit_ref="$arg"
       elif [ -z "$repository_path" ]; then
         repository_path="$arg"

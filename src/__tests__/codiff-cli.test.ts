@@ -24,6 +24,24 @@ test('parseArguments treats a hash positional as a commit ref', () => {
   });
 });
 
+test('parseArguments treats HEAD positional revisions as commit refs', () => {
+  expect(parseArguments(['HEAD'])).toEqual({
+    commitRef: 'HEAD',
+    pullRequestNumber: null,
+    pullRequestUrl: null,
+    requestedPath: resolve(process.cwd()),
+    walkthrough: false,
+  });
+
+  expect(parseArguments(['HEAD^1'])).toEqual({
+    commitRef: 'HEAD^1',
+    pullRequestNumber: null,
+    pullRequestUrl: null,
+    requestedPath: resolve(process.cwd()),
+    walkthrough: false,
+  });
+});
+
 test('parseArguments keeps existing hash-like paths as repository paths', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'codiff-cli-'));
   const repositoryPath = join(directory, 'deadbeef');
@@ -132,6 +150,41 @@ test('packaged terminal helper forwards --commit HEAD to Electron', async () => 
       '--commit',
       'HEAD',
       repositoryPath,
+    ]);
+  } finally {
+    await rm(directory, { force: true, recursive: true });
+  }
+});
+
+test('packaged terminal helper forwards HEAD^1 to Electron as a commit', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'codiff-app-helper-'));
+  const fakeBin = join(directory, 'bin');
+  const logPath = join(directory, 'open-args.txt');
+  const openPath = join(fakeBin, 'open');
+
+  try {
+    await mkdir(fakeBin);
+    await writeFile(
+      openPath,
+      '#!/bin/sh\nfor arg in "$@"; do\n  printf "%s\\n" "$arg" >> "$OPEN_ARGS_FILE"\ndone\n',
+    );
+    await chmod(openPath, 0o755);
+
+    await execFileAsync(resolve('bin/codiff-app'), ['HEAD^1'], {
+      env: {
+        ...process.env,
+        OPEN_ARGS_FILE: logPath,
+        PATH: `${fakeBin}:${process.env.PATH}`,
+      },
+    });
+
+    expect((await readFile(logPath, 'utf8')).trim().split('\n')).toEqual([
+      '-n',
+      resolve('bin/../../../..'),
+      '--args',
+      '--commit',
+      'HEAD^1',
+      process.cwd(),
     ]);
   } finally {
     await rm(directory, { force: true, recursive: true });
