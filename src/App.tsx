@@ -124,6 +124,7 @@ export default function App() {
   const loadingSectionKeysRef = useRef<Set<string>>(new Set());
   const programmaticScrollPathRef = useRef<string | null>(null);
   const programmaticScrollTimerRef = useRef<number | null>(null);
+  const repositoryRefreshRequestRef = useRef(0);
   const sourceSessionsRef = useRef<Map<string, SourceSession>>(new Map());
   const stateRef = useRef<RepositoryState | null>(null);
   const collapsedRef = useRef<Set<string>>(new Set());
@@ -144,6 +145,67 @@ export default function App() {
       ...current,
       [path]: (current[path] ?? 0) + 1,
     }));
+  }, []);
+
+  const refreshWorkingTreeState = useCallback(() => {
+    const currentState = stateRef.current;
+    if (currentState?.source.type !== 'working-tree') {
+      setLocalChangesDetected(true);
+      return;
+    }
+
+    const request = repositoryRefreshRequestRef.current + 1;
+    repositoryRefreshRequestRef.current = request;
+
+    window.codiff
+      .getRepositoryState({ type: 'working-tree' })
+      .then((nextState) => {
+        if (
+          repositoryRefreshRequestRef.current !== request ||
+          stateRef.current?.source.type !== 'working-tree'
+        ) {
+          return;
+        }
+
+        const orderedState = {
+          ...nextState,
+          files: sortFiles(nextState.files),
+        };
+        const nextViewed = readViewed(orderedState.root);
+        const nextPaths = new Set(orderedState.files.map((file) => file.path));
+
+        setState(orderedState);
+        setLoadError(null);
+        setCollapsed(
+          new Set(
+            orderedState.files
+              .filter((file) => nextViewed[file.path] === file.fingerprint)
+              .map((file) => file.path),
+          ),
+        );
+        setItemVersionByPath({});
+        setFocusCommentId(null);
+        setFocusCommentRequest(0);
+        setReviewComments(getReviewCommentsFromState(orderedState));
+        setViewed(nextViewed);
+        setSelectedPath((current) =>
+          current && nextPaths.has(current) ? current : (orderedState.files[0]?.path ?? null),
+        );
+        setWalkthrough(null);
+        setWalkthroughError(null);
+        setWalkthroughLoading(false);
+        setWalkthroughUnread(false);
+        setLocalChangesDetected(false);
+
+        if (sidebarModeRef.current === 'walkthrough' && orderedState.files.length === 0) {
+          setSidebarMode('history');
+        }
+      })
+      .catch(() => {
+        if (repositoryRefreshRequestRef.current === request) {
+          setLocalChangesDetected(true);
+        }
+      });
   }, []);
 
   const saveCurrentSourceSession = useCallback(() => {
@@ -275,9 +337,9 @@ export default function App() {
   useEffect(
     () =>
       window.codiff.onRepositoryChanged(() => {
-        setLocalChangesDetected(true);
+        refreshWorkingTreeState();
       }),
-    [],
+    [refreshWorkingTreeState],
   );
 
   useEffect(() => {
@@ -901,6 +963,7 @@ export default function App() {
           setWalkthroughError(session?.walkthroughError ?? null);
           setWalkthroughLoading(false);
           setWalkthroughUnread(false);
+          setLocalChangesDetected(false);
           setPendingSource(null);
         })
         .catch((error: unknown) => {

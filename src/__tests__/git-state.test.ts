@@ -198,6 +198,23 @@ test('readWorkingTreeState separates staged and unstaged modifications', async (
   });
 });
 
+test('readWorkingTreeState ignores files saved only in the stash', async () => {
+  await withRepo(async (repo) => {
+    await writeRepoFile(repo, 'tracked.txt', 'tracked\n');
+    await writeRepoFile(repo, 'other.txt', 'other\n');
+    await commitAll(repo, 'initial commit');
+    await writeRepoFile(repo, 'tracked.txt', 'stashed tracked\n');
+    await writeRepoFile(repo, 'new.txt', 'stashed untracked\n');
+    await git(repo, ['stash', 'push', '--include-untracked', '-m', 'codiff test stash']);
+    await writeRepoFile(repo, 'other.txt', 'visible local change\n');
+
+    const state = await readWorkingTreeState(repo);
+
+    expect(state.files.map((file) => file.path)).toEqual(['other.txt']);
+    expect(state.files[0].sections[0].newFile?.contents).toBe('visible local change\n');
+  });
+});
+
 test('readRepositoryState and history handle fresh repositories', async () => {
   await withRepo(async (repo) => {
     await writeRepoFile(repo, 'notes/todo.txt', 'write tests\n');
