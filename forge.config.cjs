@@ -4,6 +4,7 @@
 const { existsSync } = require('node:fs');
 const { join } = require('node:path');
 
+const electronCachePath = process.env.ELECTRON_CACHE || join(__dirname, '.cache/electron');
 const entitlementsPath = join(__dirname, 'electron/entitlements.plist');
 const iconPath = existsSync(join(__dirname, 'electron/icons/icon.icns'))
   ? './electron/icons/icon'
@@ -76,6 +77,9 @@ module.exports = {
     appBundleId: 'dev.nkzw-tech.codiff',
     appCopyright: 'Copyright (c) 2026-current Nakazawa Tech',
     asar: false,
+    download: {
+      cacheRoot: electronCachePath,
+    },
     executableName: 'codiff',
     ...(iconPath ? { icon: iconPath } : {}),
     ignore: [

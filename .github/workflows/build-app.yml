@@ -60,6 +60,8 @@ jobs:
         run: pnpm exec vp build
 
       - name: Build Native Apps
+        env:
+          DEBUG: electron-forge:*,electron-packager,@electron/get:*
         run: |
           rm -rf ./out
 

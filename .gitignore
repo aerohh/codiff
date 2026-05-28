@@ -1,4 +1,5 @@
 .enum_manifest.json
+.cache/
 .pnpm-debug.log
 /node_modules/
 coverage/
